@@ -1,1 +1,3 @@
-{"version":2,"functions":{"api/interview.js":{"maxDuration":30}},"rewrites":[{"source":"/api/health","destination":"/api/interview"}]}
+{
+  "version": 2
+}
