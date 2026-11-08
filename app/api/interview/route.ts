@@ -49,7 +49,7 @@ function validProfile(value: unknown): value is Profile {
 }
 
 async function askOpenAI(system: string, prompt: string, oidcToken?: string) {
-  const key = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || oidcToken;
+  const key = process.env.VERCEL_OIDC_TOKEN || oidcToken || process.env.AI_GATEWAY_API_KEY;
   if (!key) return null;
 
   const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
@@ -85,8 +85,8 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     service: "InterviewForge AI",
-    aiConfigured: Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
-    mode: (process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN) ? "vercel-ai-gateway" : "built-in",
+    aiConfigured: Boolean(process.env.VERCEL_OIDC_TOKEN || process.env.AI_GATEWAY_API_KEY),
+    mode: (process.env.VERCEL_OIDC_TOKEN || process.env.AI_GATEWAY_API_KEY) ? "vercel-ai-gateway" : "built-in",
   });
 }
 
