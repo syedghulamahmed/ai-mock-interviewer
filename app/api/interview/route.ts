@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const model = process.env.AI_GATEWAY_MODEL || "openai/gpt-4.1-mini";
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_ANSWER_LENGTH = 12_000;
 
@@ -49,10 +49,10 @@ function validProfile(value: unknown): value is Profile {
 }
 
 async function askOpenAI(system: string, prompt: string) {
-  const key = process.env.OPENAI_API_KEY;
+  const key = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
   if (!key) return null;
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -85,8 +85,8 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     service: "InterviewForge AI",
-    aiConfigured: Boolean(process.env.OPENAI_API_KEY),
-    mode: process.env.OPENAI_API_KEY ? "openai" : "built-in",
+    aiConfigured: Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
+    mode: (process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN) ? "vercel-ai-gateway" : "built-in",
   });
 }
 
@@ -135,7 +135,7 @@ export async function POST(req: Request) {
           : banks[safeProfile.type];
         return NextResponse.json({ questions, source: result ? "openai" : "built-in" });
       } catch {
-        // Keep the practice workflow available when the configured provider key is invalid or unavailable.
+        // Keep the practice workflow available when the AI Gateway credentials are unavailable or the provider failed.
         return NextResponse.json({
           questions: banks[safeProfile.type],
           source: "built-in",
@@ -174,7 +174,7 @@ export async function POST(req: Request) {
               improvements: strings(result.improvements),
               idealAnswer: typeof result.idealAnswer === "string" ? result.idealAnswer.slice(0, 1_200) : "",
             },
-            source: "openai",
+            source: "vercel-ai-gateway",
           });
         }
 
