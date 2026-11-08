@@ -1,35 +1,31 @@
 # InterviewForge AI
 
-An AI-driven mock interview platform built for the Generative AI internship assignment. Candidates configure a target role, experience level, interview style and focus area, then answer adaptive questions and receive structured feedback.
+A role-aware mock-interview practice app. Candidates choose a target role, experience level, interview style, and focus area, then answer generated questions and receive structured feedback.
 
 ## Features
-- Role- and experience-aware interview question generation using the OpenAI API when configured.
-- Technical, behavioral and mixed interview modes.
-- Answer evaluation for relevance, clarity, structure, specificity and role alignment.
-- Per-answer scores, strengths, improvement points and stronger-answer guidance.
-- Built-in fallback question bank and baseline evaluator when no API key is configured.
+- AI-generated technical, behavioral, and mixed questions.
+- Per-answer evaluation for relevance, clarity, structure, specificity, and role fit.
+- Score, strengths, improvements, and a stronger-answer direction.
 - Browser-local practice history; no account required.
-- Responsive interface.
+- Clearly labelled built-in fallback when the external AI provider is unavailable.
 
 ## Stack
-Next.js 14, React, TypeScript, Next.js Route Handlers, OpenAI Chat Completions API, Vercel.
+Next.js, React, TypeScript, Next.js Route Handlers, Vercel.
+
+## AI provider
+The app uses Vireonix's OpenAI-compatible `POST /v1/chat/completions` endpoint with model `auto`, without an API key or Authorization header. No OpenAI key, Vercel AI Gateway key, or payment card is required. The public service is free but governed by per-IP hourly usage budgets and may return HTTP 429 or become temporarily unavailable. The app then labels its built-in questions/evaluator as fallback rather than pretending they are AI output.
 
 ## Run locally
-1. Install Node.js 20+.
+1. Use Node.js 20+.
 2. Run `npm install`.
-3. Copy `.env.example` to `.env.local` and set `OPENAI_API_KEY` (optional).
-4. Run `npm run dev` and open http://localhost:3000.
+3. Run `npm run dev` and open http://localhost:3000.
 
-## Environment variables
-- `OPENAI_API_KEY`: optional OpenAI API key. Without it, the built-in evaluator is used.
-- `OPENAI_MODEL`: optional model name; defaults to `gpt-4o-mini`.
+No provider secret is required.
 
 ## API
-- `POST /api/interview` with `{ action: "start", profile }` returns three interview questions.
-- `POST /api/interview` with `{ action: "evaluate", profile, question, answer }` returns structured answer feedback.
+- `GET /api/interview`: service/provider health metadata.
+- `POST /api/interview` with `{ "action": "start", "profile": { "role": "AI / ML Engineer", "level": "Student / Entry-level", "type": "Mixed", "focus": "Projects and problem solving" } }`: returns three role-specific questions.
+- `POST /api/interview` with `{ "action": "evaluate", "profile": { "role": "AI / ML Engineer" }, "question": "...", "answer": "..." }`: returns structured feedback.
 
-## Privacy
-Interview answers are sent to OpenAI only when an API key is configured and the OpenAI evaluator is used. Otherwise, evaluation runs in the application. Practice history is stored in the browser's local storage. Do not submit confidential or personally sensitive information.
-
-## Limitations
-The built-in evaluator is a lightweight heuristic and is not a substitute for expert human assessment. Scores are guidance, not hiring decisions. Browser-local history does not sync across devices.
+## Privacy and limitations
+Interview answers and profile details are sent to Vireonix and may be retained and used for model training and improvement. The app discloses this before starting and links to https://vireonix.ai/terms. Do not submit sensitive personal data, secrets, or confidential interview material. The service has no SLA or reserved capacity. Scores are coaching guidance, not validated hiring predictions. History stays in the current browser.
