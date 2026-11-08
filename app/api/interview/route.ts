@@ -1,10 +1,215 @@
 import { NextResponse } from "next/server";
+
 export const runtime = "nodejs";
-export async function GET(){return NextResponse.json({ok:true,service:"InterviewForge AI",aiConfigured:Boolean(process.env.OPENAI_API_KEY),mode:process.env.OPENAI_API_KEY?"openai":"built-in"});}
+
 const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-async function askOpenAI(system:string,prompt:string){const key=process.env.OPENAI_API_KEY;if(!key)return null;const res=await fetch("https://api.openai.com/v1/chat/completions",{method:"POST",headers:{"Content-Type":"application/json",Authorization:`Bearer ${key}`},body:JSON.stringify({model,temperature:0.6,response_format:{type:"json_object"},messages:[{role:"system",content:system},{role:"user",content:prompt}]})});if(!res.ok){const detail=await res.text();throw new Error(`OpenAI request failed (${res.status}): ${detail.slice(0,240)}`)}const data=await res.json();return JSON.parse(data.choices?.[0]?.message?.content||"{}");}
-const banks:Record<string,string[]>={Technical:["Explain a challenging technical problem you solved. What was your approach?","How would you debug a production issue that is difficult to reproduce?","What trade-offs would you consider when designing a scalable system?"],Behavioral:["Tell me about a time you received difficult feedback. How did you respond?","Describe a situation where you had to learn a new skill quickly.","Tell me about a time you disagreed with a teammate."],Mixed:["Walk me through a project you are proud of and the technical decisions behind it.","How do you prioritize when several important tasks have the same deadline?","Describe a difficult problem you solved and what you learned from it."]};
-function fallbackScore(answer:string){const words=answer.trim().split(/\\s+/).filter(Boolean).length;const structure=/\b(situation|task|action|result|because|therefore|first|then|finally|impact|learned)\b/i.test(answer);return Math.max(25,Math.min(88,Math.round(30+Math.min(words,130)*0.35+(structure?12:0)+(words>45?8:0))));}
-export async function POST(req:Request){try{const body=await req.json();const {action,profile,question,answer}=body;if(!profile?.role)return NextResponse.json({error:"Choose a target role first."},{status:400});if(action==="start"){const result=await askOpenAI("You are an expert technical recruiter. Return only JSON with a questions array of exactly 3 concise, role-specific interview questions. Adapt to experience level, interview style and focus. Avoid generic questions.",JSON.stringify({role:profile.role,level:profile.level,style:profile.type,focus:profile.focus}));return NextResponse.json({questions:Array.isArray(result?.questions)&&result.questions.length===3?result.questions:banks[profile.type]||banks.Mixed,source:result?.questions?"openai":"built-in"});}
-if(action==="evaluate"){if(typeof answer!=="string"||answer.trim().length<8)return NextResponse.json({error:"Please provide a more complete answer before evaluation."},{status:400});const result=await askOpenAI("You are a fair, constructive interview coach. Evaluate the candidate answer for relevance, clarity, structure, specificity and role relevance. Return JSON: score (integer 0-100), verdict (short sentence), strengths (2-3 concise strings), improvements (2-3 concise strings), idealAnswer (a concise example direction, not fabricated personal experience). Be specific and encouraging.",JSON.stringify({role:profile.role,level:profile.level,focus:profile.focus,question,answer}));if(result?.score!==undefined)return NextResponse.json({feedback:{score:Math.max(0,Math.min(100,Number(result.score)||0)),verdict:String(result.verdict||""),strengths:Array.isArray(result.strengths)?result.strengths:[],improvements:Array.isArray(result.improvements)?result.improvements:[],idealAnswer:String(result.idealAnswer||"")},source:"openai"});const score=fallbackScore(answer);return NextResponse.json({feedback:{score,verdict:"Baseline feedback from the built-in evaluator.",strengths:answer.trim().split(/\\s+/).length>35?["You provided a developed response rather than a one-line answer."]:["You attempted the question directly."],improvements:["Add a concrete example with your personal contribution.","Use a clear situation, action, and result structure.","Connect the outcome to the target role."],idealAnswer:"Structure your response around the context, the specific action you took, the reasoning behind it, and a measurable or observable outcome."},source:"built-in"});}
-return NextResponse.json({error:"Unsupported action."},{status:400});}catch(error){return NextResponse.json({error:error instanceof Error?error.message:"Unexpected server error."},{status:500});}}
+const MAX_BODY_BYTES = 32 * 1024;
+const MAX_ANSWER_LENGTH = 12_000;
+
+type Profile = {
+  role: string;
+  level?: string;
+  type?: "Technical" | "Behavioral" | "Mixed";
+  focus?: string;
+};
+
+const banks: Record<string, string[]> = {
+  Technical: [
+    "Explain a challenging technical problem you solved. What was your approach?",
+    "How would you debug a production issue that is difficult to reproduce?",
+    "What trade-offs would you consider when designing a scalable system?",
+  ],
+  Behavioral: [
+    "Tell me about a time you received difficult feedback. How did you respond?",
+    "Describe a situation where you had to learn a new skill quickly.",
+    "Tell me about a time you disagreed with a teammate.",
+  ],
+  Mixed: [
+    "Walk me through a project you are proud of and the technical decisions behind it.",
+    "How do you prioritize when several important tasks have the same deadline?",
+    "Describe a difficult problem you solved and what you learned from it.",
+  ],
+};
+
+function fallbackScore(answer: string) {
+  const words = answer.trim().split(/\s+/).filter(Boolean).length;
+  const structure = /\b(situation|task|action|result|because|therefore|first|then|finally|impact|learned)\b/i.test(answer);
+  return Math.max(25, Math.min(88, Math.round(30 + Math.min(words, 130) * 0.35 + (structure ? 12 : 0) + (words > 45 ? 8 : 0))));
+}
+
+function validProfile(value: unknown): value is Profile {
+  if (!value || typeof value !== "object") return false;
+  const profile = value as Record<string, unknown>;
+  return typeof profile.role === "string" &&
+    profile.role.trim().length > 0 &&
+    profile.role.length <= 100 &&
+    (profile.level === undefined || (typeof profile.level === "string" && profile.level.length <= 80)) &&
+    (profile.type === undefined || ["Technical", "Behavioral", "Mixed"].includes(String(profile.type))) &&
+    (profile.focus === undefined || (typeof profile.focus === "string" && profile.focus.length <= 240));
+}
+
+async function askOpenAI(system: string, prompt: string) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return null;
+
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    },
+    body: JSON.stringify({
+      model,
+      temperature: 0.6,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: prompt },
+      ],
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+
+  if (!response.ok) {
+    // Never forward provider response bodies or credentials to the browser.
+    throw new Error("AI_PROVIDER_ERROR");
+  }
+
+  const data = await response.json();
+  const raw = data.choices?.[0]?.message?.content;
+  if (typeof raw !== "string") throw new Error("AI_INVALID_RESPONSE");
+  return JSON.parse(raw);
+}
+
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    service: "InterviewForge AI",
+    aiConfigured: Boolean(process.env.OPENAI_API_KEY),
+    mode: process.env.OPENAI_API_KEY ? "openai" : "built-in",
+  });
+}
+
+export async function POST(req: Request) {
+  try {
+    const declaredLength = Number(req.headers.get("content-length") || 0);
+    if (declaredLength > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: "Request is too large." }, { status: 413 });
+    }
+
+    const rawBody = await req.text();
+    if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: "Request is too large." }, { status: 413 });
+    }
+
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
+    }
+
+    const action = body.action;
+    const profile = body.profile;
+    if (!validProfile(profile)) {
+      return NextResponse.json({ error: "Choose a valid target role and profile." }, { status: 400 });
+    }
+
+    const safeProfile = {
+      role: profile.role.trim(),
+      level: (profile.level || "Student / Entry-level").trim(),
+      type: profile.type || "Mixed",
+      focus: (profile.focus || "Project experience and problem-solving").trim(),
+    };
+
+    if (action === "start") {
+      try {
+        const result = await askOpenAI(
+          "You are an expert technical recruiter. Return only JSON with a questions array of exactly 3 concise, role-specific interview questions. Adapt to experience level, interview style and focus. Avoid generic questions.",
+          JSON.stringify(safeProfile),
+        );
+        const questions = Array.isArray(result?.questions) &&
+          result.questions.length === 3 &&
+          result.questions.every((item: unknown) => typeof item === "string" && item.trim().length > 0 && item.length <= 500)
+          ? result.questions
+          : banks[safeProfile.type];
+        return NextResponse.json({ questions, source: result ? "openai" : "built-in" });
+      } catch {
+        return NextResponse.json(
+          { error: "The AI interviewer is temporarily unavailable. Please try again shortly." },
+          { status: 502 },
+        );
+      }
+    }
+
+    if (action === "evaluate") {
+      const { question, answer } = body;
+      if (typeof question !== "string" || question.trim().length === 0 || question.length > 1_200) {
+        return NextResponse.json({ error: "Provide a valid interview question." }, { status: 400 });
+      }
+      if (typeof answer !== "string" || answer.trim().length < 8) {
+        return NextResponse.json({ error: "Please provide a more complete answer before evaluation." }, { status: 400 });
+      }
+      if (answer.length > MAX_ANSWER_LENGTH) {
+        return NextResponse.json({ error: "Your answer is too long. Keep it under 12,000 characters." }, { status: 413 });
+      }
+
+      try {
+        const result = await askOpenAI(
+          "You are a fair, constructive interview coach. Evaluate the candidate answer for relevance, clarity, structure, specificity and role relevance. Return JSON: score (integer 0-100), verdict (short sentence), strengths (2-3 concise strings), improvements (2-3 concise strings), idealAnswer (a concise example direction, not fabricated personal experience). Be specific and encouraging.",
+          JSON.stringify({ ...safeProfile, question: question.trim(), answer: answer.trim() }),
+        );
+
+        if (result && Number.isFinite(Number(result.score))) {
+          const strings = (value: unknown) =>
+            Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 3).map(item => item.slice(0, 400)) : [];
+          return NextResponse.json({
+            feedback: {
+              score: Math.max(0, Math.min(100, Math.round(Number(result.score)))),
+              verdict: typeof result.verdict === "string" ? result.verdict.slice(0, 500) : "Your answer has been evaluated.",
+              strengths: strings(result.strengths),
+              improvements: strings(result.improvements),
+              idealAnswer: typeof result.idealAnswer === "string" ? result.idealAnswer.slice(0, 1_200) : "",
+            },
+            source: "openai",
+          });
+        }
+
+        if (process.env.OPENAI_API_KEY) {
+          return NextResponse.json(
+            { error: "The AI returned an incomplete evaluation. Please try again." },
+            { status: 502 },
+          );
+        }
+      } catch {
+        return NextResponse.json(
+          { error: "The AI evaluator is temporarily unavailable. Please try again shortly." },
+          { status: 502 },
+        );
+      }
+
+      const words = answer.trim().split(/\s+/).filter(Boolean).length;
+      const score = fallbackScore(answer);
+      return NextResponse.json({
+        feedback: {
+          score,
+          verdict: "Baseline feedback from the built-in evaluator; this is not an expert or validated score.",
+          strengths: words > 35
+            ? ["You provided a developed response rather than a one-line answer."]
+            : ["You attempted the question directly."],
+          improvements: [
+            "Add a concrete example with your personal contribution.",
+            "Use a clear situation, action, and result structure.",
+            "Connect the outcome to the target role.",
+          ],
+          idealAnswer: "Structure your response around the context, the specific action you took, the reasoning behind it, and a measurable or observable outcome.",
+        },
+        source: "built-in",
+      });
+    }
+
+    return NextResponse.json({ error: "Unsupported action." }, { status: 400 });
+  } catch {
+    return NextResponse.json({ error: "Unexpected server error. Please try again." }, { status: 500 });
+  }
+}
