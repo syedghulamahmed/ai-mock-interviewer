@@ -49,7 +49,7 @@ function validProfile(value: unknown): value is Profile {
 }
 
 async function askOpenAI(system: string, prompt: string, oidcToken?: string) {
-  const key = process.env.AI_GATEWAY_API_KEY || oidcToken;
+  const key = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || oidcToken;
   if (!key) return null;
 
   const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
@@ -85,8 +85,8 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     service: "InterviewForge AI",
-    aiConfigured: Boolean(process.env.AI_GATEWAY_API_KEY || req.headers.get("x-vercel-oidc-token")),
-    mode: (process.env.AI_GATEWAY_API_KEY || req.headers.get("x-vercel-oidc-token")) ? "vercel-ai-gateway" : "built-in",
+    aiConfigured: Boolean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN),
+    mode: (process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN) ? "vercel-ai-gateway" : "built-in",
   });
 }
 
@@ -127,7 +127,7 @@ export async function POST(req: Request) {
         const result = await askOpenAI(
           "You are an expert technical recruiter. Return only JSON with a questions array of exactly 3 concise, role-specific interview questions. Adapt to experience level, interview style and focus. Avoid generic questions.",
           JSON.stringify(safeProfile),
-          req.headers.get("x-vercel-oidc-token") || undefined,
+          process.env.VERCEL_OIDC_TOKEN || undefined,
         );
         const questions = Array.isArray(result?.questions) &&
           result.questions.length === 3 &&
@@ -162,7 +162,7 @@ export async function POST(req: Request) {
         result = await askOpenAI(
           "You are a fair, constructive interview coach. Evaluate the candidate answer for relevance, clarity, structure, specificity and role relevance. Return JSON: score (integer 0-100), verdict (short sentence), strengths (2-3 concise strings), improvements (2-3 concise strings), idealAnswer (a concise example direction, not fabricated personal experience). Be specific and encouraging.",
           JSON.stringify({ ...safeProfile, question: question.trim(), answer: answer.trim() }),
-          req.headers.get("x-vercel-oidc-token") || undefined,
+          process.env.VERCEL_OIDC_TOKEN || undefined,
         );
 
         if (result && Number.isFinite(Number(result.score))) {
