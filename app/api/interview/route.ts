@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const model = process.env.AI_GATEWAY_MODEL || "openai/gpt-4.1-mini";
+const model = "auto";
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_ANSWER_LENGTH = 12_000;
 
@@ -48,36 +48,26 @@ function validProfile(value: unknown): value is Profile {
     (profile.focus === undefined || (typeof profile.focus === "string" && profile.focus.length <= 240));
 }
 
-async function askOpenAI(system: string, prompt: string, oidcToken?: string) {
-  const key = process.env.VERCEL_OIDC_TOKEN || oidcToken || process.env.AI_GATEWAY_API_KEY;
-  if (!key) return null;
-
-  const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
+async function askOpenAI(system: string, prompt: string) {
+  const response = await fetch("https://vireonix.ai/v1/chat/completions", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model,
-      temperature: 0.6,
+      temperature: 0.55,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: system },
         { role: "user", content: prompt },
       ],
     }),
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(25000),
   });
 
-  if (!response.ok) {
-    // Never forward provider response bodies or credentials to the browser.
-    throw new Error("AI_PROVIDER_ERROR");
-  }
-
+  if (!response.ok) throw new Error("VIREONIX_REQUEST_FAILED");
   const data = await response.json();
-  const raw = data.choices?.[0]?.message?.content;
-  if (typeof raw !== "string") throw new Error("AI_INVALID_RESPONSE");
+  const raw = data?.choices?.[0]?.message?.content;
+  if (typeof raw !== "string") throw new Error("VIREONIX_INVALID_RESPONSE");
   return JSON.parse(raw);
 }
 
@@ -85,8 +75,9 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     service: "InterviewForge AI",
-    aiConfigured: Boolean(process.env.VERCEL_OIDC_TOKEN || process.env.AI_GATEWAY_API_KEY),
-    mode: (process.env.VERCEL_OIDC_TOKEN || process.env.AI_GATEWAY_API_KEY) ? "vercel-ai-gateway" : "built-in",
+    aiConfigured: true,
+    provider: "vireonix",
+    mode: "vireonix",
   });
 }
 
@@ -127,16 +118,15 @@ export async function POST(req: Request) {
         const result = await askOpenAI(
           "You are an expert technical recruiter. Return only JSON with a questions array of exactly 3 concise, role-specific interview questions. Adapt to experience level, interview style and focus. Avoid generic questions.",
           JSON.stringify(safeProfile),
-          process.env.VERCEL_OIDC_TOKEN || undefined,
         );
         const questions = Array.isArray(result?.questions) &&
           result.questions.length === 3 &&
           result.questions.every((item: unknown) => typeof item === "string" && item.trim().length > 0 && item.length <= 500)
           ? result.questions
           : banks[safeProfile.type];
-        return NextResponse.json({ questions, source: result ? "openai" : "built-in" });
+        return NextResponse.json({ questions, source: result ? "vireonix" : "built-in" });
       } catch {
-        // Keep the practice workflow available when the AI Gateway credentials are unavailable or the provider failed.
+        // Keep the practice workflow available when the Vireonix is temporarily unavailable.
         return NextResponse.json({
           questions: banks[safeProfile.type],
           source: "built-in",
@@ -162,7 +152,6 @@ export async function POST(req: Request) {
         result = await askOpenAI(
           "You are a fair, constructive interview coach. Evaluate the candidate answer for relevance, clarity, structure, specificity and role relevance. Return JSON: score (integer 0-100), verdict (short sentence), strengths (2-3 concise strings), improvements (2-3 concise strings), idealAnswer (a concise example direction, not fabricated personal experience). Be specific and encouraging.",
           JSON.stringify({ ...safeProfile, question: question.trim(), answer: answer.trim() }),
-          process.env.VERCEL_OIDC_TOKEN || undefined,
         );
 
         if (result && Number.isFinite(Number(result.score))) {
@@ -176,7 +165,7 @@ export async function POST(req: Request) {
               improvements: strings(result.improvements),
               idealAnswer: typeof result.idealAnswer === "string" ? result.idealAnswer.slice(0, 1_200) : "",
             },
-            source: "vercel-ai-gateway",
+            source: "vireonix",
           });
         }
 
@@ -203,7 +192,7 @@ export async function POST(req: Request) {
           idealAnswer: "Structure your response around the context, the specific action you took, the reasoning behind it, and a measurable or observable outcome.",
         },
         source: "built-in",
-        notice: "The AI evaluator is unavailable. This is baseline structural feedback, not an expert assessment.",
+        notice: "Live AI evaluation is temporarily unavailable. This is baseline structural feedback, not an expert assessment.",
       });
     }
 
