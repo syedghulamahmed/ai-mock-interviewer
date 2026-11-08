@@ -178,17 +178,10 @@ export async function POST(req: Request) {
           });
         }
 
-        if (process.env.OPENAI_API_KEY) {
-          return NextResponse.json(
-            { error: "The AI returned an incomplete evaluation. Please try again." },
-            { status: 502 },
-          );
-        }
+        // Invalid or incomplete model output uses the labelled baseline evaluator below.
       } catch {
-        return NextResponse.json(
-          { error: "The AI evaluator is temporarily unavailable. Please try again shortly." },
-          { status: 502 },
-        );
+        // Provider failures use the labelled baseline evaluator below.
+        result = null;
       }
 
       const words = answer.trim().split(/\s+/).filter(Boolean).length;
