@@ -131,12 +131,11 @@ export async function POST(req: Request) {
           "You are an expert technical recruiter. Return only JSON with a questions array of exactly 3 concise, role-specific interview questions. Adapt to experience level, interview style and focus. Avoid generic questions.",
           JSON.stringify(safeProfile),
         );
-        const questions = Array.isArray(result?.questions) &&
+        const aiQuestionsValid = Array.isArray(result?.questions) &&
           result.questions.length === 3 &&
-          result.questions.every((item: unknown) => typeof item === "string" && item.trim().length > 0 && item.length <= 500)
-          ? result.questions
-          : banks[safeProfile.type];
-        return NextResponse.json({ questions, source: result ? "blockrun" : "built-in" });
+          result.questions.every((item: unknown) => typeof item === "string" && item.trim().length > 0 && item.length <= 500);
+        const questions = aiQuestionsValid ? result.questions : banks[safeProfile.type];
+        return NextResponse.json({ questions, source: aiQuestionsValid ? "blockrun" : "built-in" });
       } catch {
         // Keep the practice workflow available when live BlockRun inference is temporarily unavailable.
         return NextResponse.json({
