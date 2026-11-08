@@ -135,10 +135,12 @@ export async function POST(req: Request) {
           : banks[safeProfile.type];
         return NextResponse.json({ questions, source: result ? "openai" : "built-in" });
       } catch {
-        return NextResponse.json(
-          { error: "The AI interviewer is temporarily unavailable. Please try again shortly." },
-          { status: 502 },
-        );
+        // Keep the practice workflow available when the configured provider key is invalid or unavailable.
+        return NextResponse.json({
+          questions: banks[safeProfile.type],
+          source: "built-in",
+          notice: "AI question generation is unavailable; these are built-in practice questions.",
+        });
       }
     }
 
@@ -154,8 +156,9 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Your answer is too long. Keep it under 12,000 characters." }, { status: 413 });
       }
 
+      let result: any = null;
       try {
-        const result = await askOpenAI(
+        result = await askOpenAI(
           "You are a fair, constructive interview coach. Evaluate the candidate answer for relevance, clarity, structure, specificity and role relevance. Return JSON: score (integer 0-100), verdict (short sentence), strengths (2-3 concise strings), improvements (2-3 concise strings), idealAnswer (a concise example direction, not fabricated personal experience). Be specific and encouraging.",
           JSON.stringify({ ...safeProfile, question: question.trim(), answer: answer.trim() }),
         );
@@ -205,6 +208,7 @@ export async function POST(req: Request) {
           idealAnswer: "Structure your response around the context, the specific action you took, the reasoning behind it, and a measurable or observable outcome.",
         },
         source: "built-in",
+        notice: "The AI evaluator is unavailable. This is baseline structural feedback, not an expert assessment.",
       });
     }
 
