@@ -138,7 +138,7 @@ export async function POST(req: Request) {
           : banks[safeProfile.type];
         return NextResponse.json({ questions, source: result ? "blockrun" : "built-in" });
       } catch {
-        // Keep the practice workflow available when the Vireonix is temporarily unavailable.
+        // Keep the practice workflow available when live BlockRun inference is temporarily unavailable.
         return NextResponse.json({
           questions: banks[safeProfile.type],
           source: "built-in",
