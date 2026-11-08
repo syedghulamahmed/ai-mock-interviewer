@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const model = "auto";
+const models = ["nvidia/nemotron-3.5-bolt", "poolside/laguna-xs-2.1"];
 const MAX_BODY_BYTES = 32 * 1024;
 const MAX_ANSWER_LENGTH = 12_000;
 
@@ -48,27 +48,39 @@ function validProfile(value: unknown): value is Profile {
     (profile.focus === undefined || (typeof profile.focus === "string" && profile.focus.length <= 240));
 }
 
-async function askOpenAI(system: string, prompt: string) {
-  const response = await fetch("https://vireonix.ai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      temperature: 0.55,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: prompt },
-      ],
-    }),
-    signal: AbortSignal.timeout(25000),
-  });
-
-  if (!response.ok) throw new Error("VIREONIX_REQUEST_FAILED");
-  const data = await response.json();
-  const raw = data?.choices?.[0]?.message?.content;
-  if (typeof raw !== "string") throw new Error("VIREONIX_INVALID_RESPONSE");
-  return JSON.parse(raw);
+async function askBlockRun(system: string, prompt: string) {
+  let lastError: unknown = null;
+  for (const model of models) {
+    try {
+      const response = await fetch("https://blockrun.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          temperature: 0.45,
+          max_tokens: 1800,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: system + " Return only JSON. Do not include hidden reasoning, markdown fences, or text outside the JSON object." },
+            { role: "user", content: prompt },
+          ],
+        }),
+        signal: AbortSignal.timeout(22000),
+      });
+      if (!response.ok) {
+        lastError = new Error("BLOCKRUN_REQUEST_FAILED");
+        continue;
+      }
+      const data = await response.json();
+      const raw = data?.choices?.[0]?.message?.content;
+      if (typeof raw !== "string") throw new Error("BLOCKRUN_INVALID_RESPONSE");
+      const cleaned = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+      return JSON.parse(cleaned);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("BLOCKRUN_UNAVAILABLE");
 }
 
 export async function GET(req: Request) {
@@ -76,8 +88,8 @@ export async function GET(req: Request) {
     ok: true,
     service: "InterviewForge AI",
     aiConfigured: true,
-    provider: "vireonix",
-    mode: "vireonix",
+    provider: "blockrun",
+    mode: "blockrun",
   });
 }
 
@@ -115,7 +127,7 @@ export async function POST(req: Request) {
 
     if (action === "start") {
       try {
-        const result = await askOpenAI(
+        const result = await askBlockRun(
           "You are an expert technical recruiter. Return only JSON with a questions array of exactly 3 concise, role-specific interview questions. Adapt to experience level, interview style and focus. Avoid generic questions.",
           JSON.stringify(safeProfile),
         );
@@ -124,7 +136,7 @@ export async function POST(req: Request) {
           result.questions.every((item: unknown) => typeof item === "string" && item.trim().length > 0 && item.length <= 500)
           ? result.questions
           : banks[safeProfile.type];
-        return NextResponse.json({ questions, source: result ? "vireonix" : "built-in" });
+        return NextResponse.json({ questions, source: result ? "blockrun" : "built-in" });
       } catch {
         // Keep the practice workflow available when the Vireonix is temporarily unavailable.
         return NextResponse.json({
@@ -149,7 +161,7 @@ export async function POST(req: Request) {
 
       let result: any = null;
       try {
-        result = await askOpenAI(
+        result = await askBlockRun(
           "You are a fair, constructive interview coach. Evaluate the candidate answer for relevance, clarity, structure, specificity and role relevance. Return JSON: score (integer 0-100), verdict (short sentence), strengths (2-3 concise strings), improvements (2-3 concise strings), idealAnswer (a concise example direction, not fabricated personal experience). Be specific and encouraging.",
           JSON.stringify({ ...safeProfile, question: question.trim(), answer: answer.trim() }),
         );
@@ -165,7 +177,7 @@ export async function POST(req: Request) {
               improvements: strings(result.improvements),
               idealAnswer: typeof result.idealAnswer === "string" ? result.idealAnswer.slice(0, 1_200) : "",
             },
-            source: "vireonix",
+            source: "blockrun",
           });
         }
 
