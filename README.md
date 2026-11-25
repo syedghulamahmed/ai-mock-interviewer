@@ -1,5 +1,9 @@
 # InterviewForge AI
 
+## Live demo
+
+[Open the deployed application](https://interviewforge-ai-one.vercel.app)
+
 A role-aware mock-interview practice app. Candidates choose a target role, experience level, interview style, and focus area, then answer generated questions and receive structured feedback.
 
 ## Features
