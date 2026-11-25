@@ -83,7 +83,7 @@ async function askBlockRun(system: string, prompt: string) {
   throw lastError instanceof Error ? lastError : new Error("BLOCKRUN_UNAVAILABLE");
 }
 
-export async function GET(req: Request) {
+export async function GET() {
   return NextResponse.json({
     ok: true,
     service: "InterviewForge AI",
@@ -158,7 +158,8 @@ export async function POST(req: Request) {
         return NextResponse.json({ error: "Your answer is too long. Keep it under 12,000 characters." }, { status: 413 });
       }
 
-      let result: any = null;
+      type ModelEvaluation = { score?: unknown; verdict?: unknown; strengths?: unknown; improvements?: unknown; idealAnswer?: unknown };
+      let result: ModelEvaluation | null = null;
       try {
         result = await askBlockRun(
           "You are a fair, constructive interview coach. Evaluate the candidate answer for relevance, clarity, structure, specificity and role relevance. Return JSON: score (integer 0-100), verdict (short sentence), strengths (2-3 concise strings), improvements (2-3 concise strings), idealAnswer (a concise example direction, not fabricated personal experience). Be specific and encouraging.",
